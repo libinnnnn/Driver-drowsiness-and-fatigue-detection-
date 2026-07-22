@@ -18,6 +18,7 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({ metrics }) => {
   const yaw = metrics?.head_yaw ?? 0.0;
   const roll = metrics?.head_roll ?? 0.0;
   const yawns = metrics?.total_yawns ?? 0;
+  const microsleepCount = metrics?.microsleep_count ?? 0;
   const eyeDuration = metrics?.eye_closure_duration ?? 0.0;
   const gazeTime = metrics?.gaze_fixation_time ?? 0.0;
 
@@ -82,6 +83,13 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({ metrics }) => {
           subtitle="Total Session Yawns"
           status={yawns > 2 ? 'warning' : 'normal'}
           icon={<AlertOctagon className="w-4 h-4" />}
+        />
+        <MetricCard
+          title="Microsleep Events"
+          value={microsleepCount}
+          subtitle="Eyes closed ≥1.5s"
+          status="critical"
+          icon={<EyeOff className="w-4 h-4" />}
         />
         <MetricCard
           title="Eye Closed"

@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { MetricData } from '../../hooks/useMetricsStream';
-import { Wifi, WifiOff, ShieldAlert, CheckCircle, AlertCircle, Info, Zap } from 'lucide-react';
+import { Wifi, WifiOff, ShieldAlert, CheckCircle, AlertCircle, Info, Zap, Camera, CameraOff } from 'lucide-react';
 
 interface CenterPanelProps {
   metrics: MetricData | null;
@@ -9,6 +9,7 @@ interface CenterPanelProps {
 }
 
 export const CenterPanel: React.FC<CenterPanelProps> = ({ metrics, isConnected, latency }) => {
+  const [showPreview, setShowPreview] = useState(true);
   const predClass = metrics?.prediction_class ?? 'Alert';
   const riskLevel = metrics?.risk_level ?? 'LOW';
   const ear = metrics?.ear ?? 0.3;
@@ -47,6 +48,10 @@ export const CenterPanel: React.FC<CenterPanelProps> = ({ metrics, isConnected, 
   };
 
   const rec = getRecommendation();
+  const previewSrc = metrics?.frame_preview ? `data:image/jpeg;base64,${metrics.frame_preview}` : null;
+  const lastUpdatedText = metrics?.timestamp
+    ? new Date(metrics.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    : '—';
 
   return (
     <div className="flex flex-col space-y-4">
@@ -89,6 +94,48 @@ export const CenterPanel: React.FC<CenterPanelProps> = ({ metrics, isConnected, 
         <p className="text-xs text-slate-400 mt-1">
           Eye Closure Duration: <span className="font-mono text-slate-200">{eyeDuration.toFixed(1)}s</span> | Gaze Fixation: <span className="font-mono text-slate-200">{(metrics?.gaze_fixation_time ?? 0).toFixed(1)}s</span>
         </p>
+      </div>
+
+      {/* Live Preview Panel */}
+      <div className="rounded-xl border border-slate-800 bg-slate-900/90 p-4 backdrop-blur-md">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center space-x-2">
+            <Camera className="w-4 h-4 text-cyan-400" />
+            <div className="flex flex-col">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                Live Driver Preview
+              </span>
+              <span className="text-[10px] text-slate-500">
+                Last updated: {lastUpdatedText}
+              </span>
+            </div>
+          </div>
+          <button
+            onClick={() => setShowPreview((prev) => !prev)}
+            className="flex items-center space-x-1 rounded-full border border-slate-700 bg-slate-800/80 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-300"
+          >
+            {showPreview ? <Camera className="w-3 h-3" /> : <CameraOff className="w-3 h-3" />}
+            <span>{showPreview ? 'On' : 'Off'}</span>
+          </button>
+        </div>
+
+        {showPreview ? (
+          previewSrc ? (
+            <img
+              src={previewSrc}
+              alt="Driver camera preview"
+              className="h-44 w-full rounded-lg border border-slate-800 object-cover"
+            />
+          ) : (
+            <div className="flex h-44 items-center justify-center rounded-lg border border-dashed border-slate-700 bg-slate-800/50 text-center text-xs text-slate-500">
+              Waiting for camera thumbnail...
+            </div>
+          )
+        ) : (
+          <div className="flex h-44 items-center justify-center rounded-lg border border-dashed border-slate-700 bg-slate-800/50 text-center text-xs text-slate-500">
+            Preview disabled. Toggle it back on to view the camera feed.
+          </div>
+        )}
       </div>
 
       {/* Dynamic Safety Recommendation Banner */}

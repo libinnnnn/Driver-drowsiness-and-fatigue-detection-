@@ -24,6 +24,7 @@ export const BottomSection: React.FC<BottomSectionProps> = ({
   const totalAlerts = summary?.total_alerts ?? 0;
   const totalBlinks = summary?.total_blinks ?? 0;
   const totalYawns = summary?.total_yawns ?? 0;
+  const totalMicrosleepEvents = summary?.total_microsleep_events ?? 0;
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -69,6 +70,10 @@ export const BottomSection: React.FC<BottomSectionProps> = ({
             <div className="p-2.5 rounded-lg bg-slate-800/60 border border-slate-700/50">
               <span className="text-[10px] font-semibold text-slate-400 uppercase">Total Yawns</span>
               <p className="text-lg font-bold font-['Outfit'] text-amber-400 mt-0.5">{totalYawns}</p>
+            </div>
+            <div className="p-2.5 rounded-lg bg-slate-800/60 border border-slate-700/50">
+              <span className="text-[10px] font-semibold text-slate-400 uppercase">Total Microsleep Events</span>
+              <p className="text-lg font-bold font-['Outfit'] text-orange-400 mt-0.5">{totalMicrosleepEvents}</p>
             </div>
           </div>
         </div>

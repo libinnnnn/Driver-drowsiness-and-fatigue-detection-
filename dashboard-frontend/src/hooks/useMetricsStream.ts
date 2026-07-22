@@ -12,6 +12,7 @@ export interface MetricData {
   head_roll: number;
   total_blinks: number;
   total_yawns: number;
+  microsleep_count: number;
   gaze_fixation_time: number;
   perclos: number;
   blink_rate: number;
@@ -24,6 +25,7 @@ export interface MetricData {
   fatigue_score: number;
   risk_level: string;
   alert_message: string;
+  frame_preview?: string;
 }
 
 export interface AlertEvent {
@@ -43,7 +45,23 @@ export interface SessionSummary {
   total_alerts: number;
   total_blinks: number;
   total_yawns: number;
+  total_microsleep_events: number;
   session_duration_seconds: number;
+  frame_count?: number;
+}
+
+function createEmptySessionSummary(): SessionSummary {
+  return {
+    avg_ear: 0.0,
+    avg_mar: 0.0,
+    max_risk_score: 0.0,
+    total_alerts: 0,
+    total_blinks: 0,
+    total_yawns: 0,
+    total_microsleep_events: 0,
+    session_duration_seconds: 0,
+    frame_count: 0,
+  };
 }
 
 export function useMetricsStream() {
@@ -71,7 +89,7 @@ export function useMetricsStream() {
           setAlerts(data.alert_history);
         }
         if (data.summary) {
-          setSessionSummary(data.summary);
+          setSessionSummary({ ...createEmptySessionSummary(), ...data.summary });
         }
       }
     } catch (e) {
@@ -82,6 +100,10 @@ export function useMetricsStream() {
   useEffect(() => {
     fetchSessionState();
 
+    if (socket.connected) {
+      setIsConnected(true);
+    }
+
     function onConnect() {
       setIsConnected(true);
     }
@@ -91,6 +113,8 @@ export function useMetricsStream() {
     }
 
     function onMetricsUpdate(data: MetricData) {
+      setIsConnected(true);
+
       const now = Date.now();
       const payloadTime = data.timestamp ? data.timestamp * 1000 : now;
       const calcLatency = Math.max(0, Math.round(now - payloadTime));
@@ -100,6 +124,28 @@ export function useMetricsStream() {
       setMetricsHistory((prev) => {
         const updated = [...prev, data];
         return updated.slice(-100); // Keep last 100 points for charts
+      });
+
+      setSessionSummary((prev) => {
+        const previous = prev ?? createEmptySessionSummary();
+        const frameCount = (previous.frame_count ?? 0) + 1;
+        const avgEar = frameCount > 1
+          ? ((previous.avg_ear * (frameCount - 1)) + (data.ear ?? 0)) / frameCount
+          : (data.ear ?? 0);
+        const avgMar = frameCount > 1
+          ? ((previous.avg_mar * (frameCount - 1)) + (data.mar ?? 0)) / frameCount
+          : (data.mar ?? 0);
+
+        return {
+          ...previous,
+          avg_ear: avgEar,
+          avg_mar: avgMar,
+          max_risk_score: Math.max(previous.max_risk_score, data.fatigue_score ?? 0),
+          total_blinks: data.total_blinks ?? previous.total_blinks,
+          total_yawns: data.total_yawns ?? previous.total_yawns,
+          total_microsleep_events: data.microsleep_count ?? previous.total_microsleep_events,
+          frame_count: frameCount,
+        };
       });
 
       // Update prediction history timeline if prediction changed
@@ -116,7 +162,15 @@ export function useMetricsStream() {
     }
 
     function onNewAlert(data: AlertEvent) {
+      setIsConnected(true);
       setAlerts((prev) => [data, ...prev.slice(0, 100)]);
+      setSessionSummary((prev) => {
+        const previous = prev ?? createEmptySessionSummary();
+        return {
+          ...previous,
+          total_alerts: previous.total_alerts + 1,
+        };
+      });
     }
 
     function onSessionReset() {
@@ -124,6 +178,7 @@ export function useMetricsStream() {
       setMetricsHistory([]);
       setAlerts([]);
       setPredictionHistory([]);
+      setSessionSummary(createEmptySessionSummary());
       fetchSessionState();
     }
 
