@@ -18,11 +18,30 @@ export const Header: React.FC<HeaderProps> = ({
   const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
 
   useEffect(() => {
+    fetch('http://localhost:5000/api/session-state')
+      .then((response) => response.json())
+      .then((data) => {
+        if (data.driver_name) {
+          setDriverName(data.driver_name);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
     const timer = setInterval(() => {
       setElapsedSeconds((prev) => prev + 1);
     }, 1000);
     return () => clearInterval(timer);
   }, []);
+
+  const saveDriverName = (name: string) => {
+    fetch('http://localhost:5000/api/driver-name', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name })
+    }).catch(() => {});
+  };
 
   const formatTimer = (totalSec: number) => {
     const hrs = Math.floor(totalSec / 3600);
@@ -69,8 +88,16 @@ export const Header: React.FC<HeaderProps> = ({
                 type="text"
                 value={driverName}
                 onChange={(e) => setDriverName(e.target.value)}
-                onBlur={() => setIsEditingName(false)}
-                onKeyDown={(e) => e.key === 'Enter' && setIsEditingName(false)}
+                onBlur={() => {
+                  saveDriverName(driverName);
+                  setIsEditingName(false);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    saveDriverName(driverName);
+                    setIsEditingName(false);
+                  }
+                }}
                 autoFocus
                 className="bg-slate-800 text-slate-100 px-1.5 py-0.5 rounded outline-none w-28 text-xs font-semibold"
               />

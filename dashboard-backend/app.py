@@ -18,6 +18,8 @@ from flask import Flask, jsonify, Response, request
 from flask_socketio import SocketIO, emit
 from flask_cors import CORS
 
+import firebase_client
+
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'fatigue_detection_secret'
 CORS(app, resources={r"/*": {"origins": "*"}})
@@ -56,6 +58,7 @@ CREATE TABLE IF NOT EXISTS session_log (
 """)
 conn.commit()
 active_session_id = None
+driver_name = "Driver #01"
 
 
 def _session_snapshot():
@@ -67,6 +70,7 @@ def _session_snapshot():
         "microsleep_count": int(last_record.get("microsleep_count", 0)),
         "peak_risk_score": round(float(max(risk_scores)) if risk_scores else 0.0, 1),
         "total_alerts": int(len(alert_history)),
+        "driver_name": driver_name,
     }
 
 
@@ -93,6 +97,9 @@ def persist_session_metrics():
             (now, snapshot["microsleep_count"], snapshot["total_blinks"], snapshot["total_yawns"], snapshot["peak_risk_score"], snapshot["total_alerts"], active_session_id)
         )
     conn.commit()
+
+    # Mirror session summary to Firestore (no-op if Firebase isn't configured).
+    firebase_client.push_session_summary(active_session_id, snapshot)
 
 
 def calculate_session_summary():
@@ -175,6 +182,9 @@ def handle_new_alert(data):
     persist_session_metrics()
     socketio.emit('new_alert', data, skip_sid=request.sid)
 
+    # Mirror alert to Firestore (no-op if Firebase isn't configured).
+    firebase_client.push_alert(active_session_id, data)
+
 
 # --- REST API ENDPOINTS ---
 
@@ -188,7 +198,8 @@ def get_session_state():
         "latest_metrics": latest_metrics,
         "metrics_history": list(metrics_history),
         "alert_history": list(alert_history),
-        "summary": calculate_session_summary()
+        "summary": calculate_session_summary(),
+        "driver_name": driver_name,
     })
 
 @app.route('/api/export', methods=['GET'])
@@ -236,6 +247,17 @@ def export_csv():
         mimetype="text/csv",
         headers={"Content-Disposition": f"attachment; filename=driver_fatigue_session_{int(time.time())}.csv"}
     )
+
+@app.route('/api/driver-name', methods=['POST'])
+def set_driver_name():
+    global driver_name
+    data = request.get_json(silent=True) or {}
+    name = str(data.get("name", "")).strip()
+    if not name:
+        return jsonify({"status": "error", "message": "Name cannot be empty."}), 400
+    driver_name = name[:100]
+    persist_session_metrics()
+    return jsonify({"status": "success", "driver_name": driver_name})
 
 @app.route('/api/reset', methods=['POST'])
 def reset_session():

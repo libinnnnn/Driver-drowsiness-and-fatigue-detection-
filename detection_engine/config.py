@@ -14,9 +14,9 @@ EAR_CLOSED_FACTOR = 0.72        # Calibration multiplier: threshold = baseline_e
 # ---------------------------------------------------------------------------
 # Mouth Aspect Ratio (MAR) and Yawn Detection
 # ---------------------------------------------------------------------------
-YAWN_MAR_THRESHOLD = 0.45       # MAR above this = potential yawn (lowered from 0.55)
-YAWN_MAR_FACTOR = 0.22          # Calibration additive: threshold = baseline_mar + factor
-YAWN_MIN_FRAMES = 12            # Min consecutive frames above threshold for a yawn (~0.4s @ 30fps)
+YAWN_MAR_THRESHOLD = 0.35       # MAR above this = potential yawn
+YAWN_MAR_FACTOR = 0.16          # Calibration additive: threshold = baseline_mar + factor
+YAWN_MIN_FRAMES = 9             # Min consecutive frames above threshold for a yawn (~0.3s @ 30fps)
 
 # ---------------------------------------------------------------------------
 # Blink Detection
@@ -32,10 +32,10 @@ PERCLOS_WINDOW_SECONDS = 60.0   # Rolling window for PERCLOS and blink rate calc
 # ---------------------------------------------------------------------------
 # Startup Baseline Calibration
 # ---------------------------------------------------------------------------
-CALIBRATION_DURATION_SECONDS = 3.0   # Seconds to collect baseline samples at startup
+CALIBRATION_DURATION_SECONDS = 6.0   # Seconds to collect baseline samples at startup
 
 # ---------------------------------------------------------------------------
 # Emergency Alarm Audio
 # ---------------------------------------------------------------------------
 ALARM_VOLUME = 1.0                  # Max volume by default; lower if needed
-MICROSLEEP_ALARM_SECONDS = 1.5      # Trigger alarm when eyes stay closed continuously for this long
+MICROSLEEP_ALARM_SECONDS = 0.8      # Trigger alarm when eyes stay closed continuously for this long

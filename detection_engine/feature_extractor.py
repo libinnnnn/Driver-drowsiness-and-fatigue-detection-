@@ -81,6 +81,7 @@ class FeatureExtractor:
         # ------------------------------------------------------------------ #
         #  Rolling buffers                                                      #
         # ------------------------------------------------------------------ #
+        self.ear_smoothing_buffer = deque(maxlen=3)
         self.eye_state_history: deque = deque()   # (timestamp, is_closed: bool)
         self.blink_timestamps: deque = deque()    # timestamps of completed blinks
         self.feature_history: deque = deque(maxlen=60)  # last ~2s frame features
@@ -336,6 +337,8 @@ class FeatureExtractor:
         # ---- 1. Compute EAR and MAR -------------------------------------- #
         _, _, ear = self.compute_ear(landmarks)
         mar = self.compute_mar(landmarks)
+        self.ear_smoothing_buffer.append(ear)
+        smoothed_ear = sum(self.ear_smoothing_buffer) / len(self.ear_smoothing_buffer)
 
         # ---- 2. Startup calibration -------------------------------------- #
         calibrating = self._update_calibration(ear, mar)
@@ -344,7 +347,7 @@ class FeatureExtractor:
         pitch, yaw, roll, rvec, tvec = self.estimate_head_pose(landmarks, frame_shape)
 
         # ---- 4. Eye Closure & Blink Logic -------------------------------- #
-        is_eye_closed = ear < self.ear_threshold
+        is_eye_closed = smoothed_ear < self.ear_threshold
 
         if is_eye_closed:
             self.blink_counter += 1
@@ -361,7 +364,19 @@ class FeatureExtractor:
             self.current_eye_closure_duration = 0.0
 
         # ---- 5. Yawn Logic ----------------------------------------------- #
-        is_yawning = mar > self.yawn_mar_threshold
+        mouth_vertical_opening = euclidean_dist(
+            (landmarks[13][0], landmarks[13][1]),
+            (landmarks[14][0], landmarks[14][1])
+        )
+        mouth_width = euclidean_dist(
+            (landmarks[78][0], landmarks[78][1]),
+            (landmarks[308][0], landmarks[308][1])
+        )
+        is_yawning = (
+            mar > self.yawn_mar_threshold
+            and mouth_width > 0
+            and mouth_vertical_opening > mouth_width * 0.5
+        )
         if is_yawning:
             self.yawn_counter += 1
         else:

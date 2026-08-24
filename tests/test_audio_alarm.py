@@ -9,7 +9,7 @@ class AlarmControllerTests(unittest.TestCase):
         controller = AlarmController(initialize_audio=False)
 
         self.assertFalse(controller.update_from_eye_state(False, 0.5))
-        self.assertFalse(controller.update_from_eye_state(True, 1.4))
+        self.assertFalse(controller.update_from_eye_state(True, MICROSLEEP_ALARM_SECONDS - 0.1))
         self.assertTrue(controller.update_from_eye_state(True, MICROSLEEP_ALARM_SECONDS + 0.1))
 
     def test_alarm_stops_immediately_when_eyes_open_again(self):
