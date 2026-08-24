@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+dashboard-frontend/node_modules/
+dashboard-frontend/dist/
+outputs/
+dashboard-backend/firebase-credentials.json

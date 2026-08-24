@@ -25,10 +25,10 @@ const config: Config = {
           900: "#0c4a6e",
         },
         alert: {
-          low: "#10b981",       # green
-          medium: "#f59e0b",    # yellow/amber
-          high: "#f97316",      # orange
-          critical: "#ef4444",  # red
+          low: "#10b981",     
+          medium: "#f59e0b",  
+          high: "#f97316",    
+          critical: "#ef4444",
         }
       },
       borderRadius: {

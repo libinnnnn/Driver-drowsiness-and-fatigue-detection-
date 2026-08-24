@@ -12,6 +12,7 @@ import sys
 import os
 import time
 import math
+import base64
 import warnings
 import logging
 import cv2
@@ -33,6 +34,8 @@ from detection_engine.feature_extractor import FeatureExtractor
 from detection_engine.predictor import FatiguePredictor
 from detection_engine.visualizer import Visualizer
 from detection_engine.socket_client import DetectionSocketClient
+from detection_engine.audio import AlarmController
+from detection_engine.config import EAR_THRESHOLD
 
 
 def create_synthetic_face_frame(t: float, width: int = 640, height: int = 480) -> np.ndarray:
@@ -85,6 +88,28 @@ def create_synthetic_face_frame(t: float, width: int = 640, height: int = 480) -
     return frame
 
 
+def encode_preview_frame(frame: np.ndarray, pixel_landmarks=None, target_size=(160, 120), quality: int = 80) -> str:
+    """Build a small JPEG preview with minimal eye-outline overlays for the dashboard."""
+    preview = cv2.resize(frame, target_size)
+    if pixel_landmarks:
+        frame_h, frame_w = frame.shape[:2]
+        preview_h, preview_w = preview.shape[:2]
+        for eye_indices, color in ((FaceMeshDetector.LEFT_EYE, (0, 255, 255)), (FaceMeshDetector.RIGHT_EYE, (255, 0, 255))):
+            eye_points = [pixel_landmarks[idx] for idx in eye_indices if idx < len(pixel_landmarks)]
+            if len(eye_points) < 3:
+                continue
+            xs = [int(point[0] * preview_w / max(frame_w, 1)) for point in eye_points]
+            ys = [int(point[1] * preview_h / max(frame_h, 1)) for point in eye_points]
+            x_min, y_min = min(xs), min(ys)
+            x_max, y_max = max(xs), max(ys)
+            pad = 4
+            cv2.rectangle(preview, (x_min - pad, y_min - pad), (x_max + pad, y_max + pad), color, 1)
+
+    cv2.putText(preview, "LIVE", (8, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 255), 1, cv2.LINE_AA)
+    _, buffer = cv2.imencode('.jpg', preview, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
+    return base64.b64encode(buffer).decode('ascii')
+
+
 def main():
     print("==========================================================")
     print("   DRIVER FATIGUE & DROWSINESS DETECTION ENGINE STARTING  ")
@@ -96,6 +121,7 @@ def main():
     predictor = FatiguePredictor()
     visualizer = Visualizer()
     socket_client = DetectionSocketClient(server_url="http://localhost:5000")
+    alarm_controller = AlarmController()
     socket_client.connect()
 
     # Try opening physical camera
@@ -118,6 +144,22 @@ def main():
     fps_counter = 0
     fps_start_time = time.time()
     current_fps = 30.0
+    eye_closure_duration_seconds = 0.0
+    consecutive_open_frames = 0
+    last_frame_time = time.time()
+    microsleep_count = 0
+    last_preview_emit_time = time.time()
+    last_preview_frame_b64 = None
+    preview_emit_interval_seconds = 0.24
+
+    def reset_microsleep_counter():
+        nonlocal microsleep_count, eye_closure_duration_seconds, consecutive_open_frames
+        microsleep_count = 0
+        eye_closure_duration_seconds = 0.0
+        consecutive_open_frames = 0
+        alarm_controller.stop()
+
+    socket_client.set_reset_handler(reset_microsleep_counter)
 
     window_name = "Driver Fatigue & Drowsiness Detection System (OpenCV HUD)"
     try:
@@ -141,40 +183,94 @@ def main():
                     continue
                 frame = cv2.flip(frame, 1)  # Mirror frame for intuitive view
 
+            frame_dt = max(time.time() - last_frame_time, 1.0 / max(current_fps, 1.0))
+            last_frame_time = time.time()
+
             # 1. Process frame with MediaPipe Face Mesh
             pixel_landmarks, raw_landmarks = detector.process_frame(frame)
 
             if pixel_landmarks:
                 # 2. Extract metrics and features
                 metrics = extractor.process_frame(pixel_landmarks, frame.shape)
+                metrics["fps"] = current_fps
                 ml_features = metrics.get("ml_features", {})
 
                 # 3. Predict Fatigue & Risk Level with Random Forest Model
                 prediction = predictor.predict(ml_features)
 
-                # 4. Draw telemetry HUD and alerts on OpenCV frame
-                output_frame = visualizer.draw_hud(frame, metrics, prediction, pixel_landmarks)
+                # 4. Eye-closure duration alarm (independent of classifier risk state)
+                ear = metrics.get("ear", 0.0)
+                eyes_closed = ear < EAR_THRESHOLD
 
-                # 5. Emit socket metrics (throttled inside socket_client to 200ms)
-                socket_client.emit_metrics(metrics, prediction)
+                if eyes_closed:
+                    consecutive_open_frames = 0
+                    eye_closure_duration_seconds += frame_dt
+                else:
+                    consecutive_open_frames += 1
+                    if consecutive_open_frames >= 2:
+                        eye_closure_duration_seconds = 0.0
+
+                alarm_active = alarm_controller.update_from_eye_state(
+                    eyes_closed=eyes_closed,
+                    closure_duration_seconds=eye_closure_duration_seconds,
+                )
+                microsleep_event = bool(alarm_controller.last_transitioned_to_active)
+                if microsleep_event:
+                    microsleep_count += 1
+                prediction["alarm_active"] = alarm_active
+                prediction["microsleep_event"] = microsleep_event
+                prediction["microsleep_count"] = microsleep_count
+                metrics["microsleep_count"] = microsleep_count
+
+                now = time.time()
+                preview_frame_b64 = None
+                if (now - last_preview_emit_time) >= preview_emit_interval_seconds:
+                    preview_frame_b64 = encode_preview_frame(frame, pixel_landmarks)
+                    last_preview_frame_b64 = preview_frame_b64
+                    last_preview_emit_time = now
+                else:
+                    preview_frame_b64 = last_preview_frame_b64
+
+                if preview_frame_b64:
+                    metrics["frame_preview"] = preview_frame_b64
+
+                # 5. Emit socket metrics immediately (before rendering HUD)
+                socket_client.emit_metrics(metrics, prediction, frame_preview=preview_frame_b64)
+
+                # 6. Draw telemetry HUD and alerts on OpenCV frame
+                output_frame = visualizer.draw_hud(frame, metrics, prediction, pixel_landmarks)
             else:
-                # No face detected
-                output_frame = frame.copy()
-                cv2.putText(output_frame, "NO FACE DETECTED", (50, 50),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2, cv2.LINE_AA)
-                
-                # Emit empty/searching metrics
+                # Emit empty/searching metrics immediately
                 empty_metrics = {
                     "ear": 0.0, "mar": 0.0, "eye_state": "UNKNOWN",
                     "total_blinks": extractor.total_blinks, "total_yawns": extractor.total_yawns,
-                    "ml_features": {}
+                    "fps": current_fps, "ml_features": {}
                 }
                 empty_prediction = {
                     "prediction_class": "Searching", "risk_level": "LOW",
                     "fatigue_score": 0.0, "alert_message": "Position face in camera view",
                     "probabilities": {}
                 }
-                socket_client.emit_metrics(empty_metrics, empty_prediction)
+                empty_prediction["alarm_active"] = alarm_controller.is_alarm_playing
+                empty_prediction["microsleep_count"] = microsleep_count
+                empty_metrics["microsleep_count"] = microsleep_count
+
+                now = time.time()
+                preview_frame_b64 = None
+                if (now - last_preview_emit_time) >= preview_emit_interval_seconds:
+                    preview_frame_b64 = encode_preview_frame(frame, None)
+                    last_preview_frame_b64 = preview_frame_b64
+                    last_preview_emit_time = now
+                else:
+                    preview_frame_b64 = last_preview_frame_b64
+
+                if preview_frame_b64:
+                    empty_metrics["frame_preview"] = preview_frame_b64
+
+                socket_client.emit_metrics(empty_metrics, empty_prediction, frame_preview=preview_frame_b64)
+
+                # Render composite HUD sidebar canvas for searching state
+                output_frame = visualizer.draw_hud(frame, empty_metrics, empty_prediction, None)
 
             # Calculate FPS
             fps_counter += 1
@@ -182,9 +278,6 @@ def main():
                 current_fps = fps_counter / (time.time() - fps_start_time)
                 fps_counter = 0
                 fps_start_time = time.time()
-
-            cv2.putText(output_frame, f"FPS: {current_fps:.1f}", (output_frame.shape[1] - 120, output_frame.shape[0] - 15),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1, cv2.LINE_AA)
 
             # Display frame in OpenCV window
             try:
@@ -202,6 +295,7 @@ def main():
         if not synthetic_mode and cap:
             cap.release()
         detector.close()
+        alarm_controller.close()
         socket_client.disconnect()
         try:
             cv2.destroyAllWindows()
